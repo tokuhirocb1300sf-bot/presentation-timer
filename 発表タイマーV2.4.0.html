@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>発表タイマー</title>
+<!-- 
+========== 発表タイマー V3改善版 =========
+Web Audio API倍音合成チャイム音仕様：
+- 基音周波数：880Hz（明るく金属的な音）
+- 倍音比率：[1倍（880Hz）, 2.756倍（2,423.28Hz）, 5.404倍（4,751.52Hz）]
+- 波形：サイン波
+- 減衰時間：1.2秒（指数関数的減衰）
+- 各倍音の相対音量：[0.7, 0.5, 0.35]
+- マスターゲイン：0.8
+========================================
+-->
+<style>
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  background: #000;
+  color: #fff;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  padding: 0;
+  overflow-x: hidden;
+}
+
+.container {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  gap: 20px;
+}
+
+/* 上段：ステータスとボタン */
+.top-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+  min-height: 0;
+}
+
+/* ステータス表示 */
+.status-display {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  flex: 0 0 auto;
+}
+
+.status-row:nth-child(2) {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 1段目：ステップ */
+.step-display {
+  font-size: clamp(36px, 12vw, 75px);
+  font-weight: bold;
+  color: #FFD700;
+  text-align: center;
+}
+
+/* 2段目：タイマー */
+.timer-display {
+  font-size: clamp(80px, 32vw, 180px);
+  font-weight: bold;
+  color: #00FF00;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+/* 3段目：メッセージ */
+.message-display {
+  font-size: clamp(20px, 7vw, 40px);
+  color: #FF6B6B;
+  text-align: center;
+  min-height: 40px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ボタンエリア */
+.button-area {
+  display: flex;
+  gap: 10px;
+  width: 50%;
+  margin-top: auto;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.btn {
+  flex: 1;
+  padding: 12px 16px;
+  font-size: clamp(11px, 2.5vw, 14px);
+  font-weight: 600;
+  border: 2px solid #FFD700;
+  background: rgba(255, 215, 0, 0.1);
+  color: #FFD700;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn:hover {
+  background: rgba(255, 215, 0, 0.2);
+  transform: scale(1.02);
+}
+
+.btn:active {
+  transform: scale(0.98);
+}
+
+.btn-reset {
+  border-color: #FF6B6B;
+  color: #FF6B6B;
+  background: rgba(255, 107, 107, 0.1);
+}
+
+.btn-reset:hover {
+  background: rgba(255, 107, 107, 0.2);
+}
+
+/* プログレスバー */
+.progress-container {
+  width: 100%;
+  margin: 10px 0;
+}
+
+.progress-label {
+  font-size: 12px;
+  color: #888;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+
+.progress-bar {
+  width: 100%;
+  height: 24px;
+  background: #222;
+  border: 1px solid #444;
+  border-radius: 4px;
+  overflow: visible;
+  position: relative;
+  display: flex;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #333 0%, #555 100%);
+  transition: width 0.1s linear;
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+}
+
+.progress-fill.stage-presentation {
+  background: linear-gradient(90deg, rgba(255, 165, 0, 0.3) 0%, rgba(255, 140, 0, 0.6) 100%);
+}
+
+.progress-fill.stage-qa {
+  background: linear-gradient(90deg, rgba(255, 69, 0, 0.3) 0%, rgba(255, 20, 147, 0.6) 100%);
+}
+
+.progress-fill.stage-finished {
+  background: linear-gradient(90deg, rgba(128, 0, 128, 0.3) 0%, rgba(138, 43, 226, 0.6) 100%);
+}
+
+.milestone {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.7);
+  z-index: 10;
+}
+
+.milestone-label {
+  position: absolute;
+  font-size: 20px;
+  color: #aaa;
+  top: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* 下段：設定 */
+.bottom-section {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  max-height: 280px;
+  overflow-y: auto;
+  transition: all 0.3s ease;
+}
+
+.bottom-section.hidden {
+  display: none;
+}
+
+.settings-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #FFD700;
+  margin-bottom: 8px;
+}
+
+.settings-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.setting-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.setting-label {
+  font-size: 12px;
+  color: #ccc;
+  white-space: nowrap;
+}
+
+.setting-label.bracket::before {
+  content: "【";
+}
+
+.setting-label.bracket::after {
+  content: "】";
+  margin-left: 4px;
+}
+
+.number-input {
+  width: 50px;
+  padding: 6px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid #444;
+  color: #00FF00;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.number-buttons {
+  display: flex;
+  gap: 2px;
+}
+
+.number-btn {
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: rgba(255, 215, 0, 0.1);
+  border: 1px solid #FFD700;
+  color: #FFD700;
+  cursor: pointer;
+  border-radius: 2px;
+  font-size: 12px;
+  font-weight: bold;
+}
+
+.number-btn:hover {
+  background: rgba(255, 215, 0, 0.2);
+}
+
+.mode-buttons {
+  display: flex;
+  gap: 4px;
+}
+
+.mode-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: #ccc;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.mode-btn.active {
+  background: #FFD700;
+  color: #000;
+  border-color: #FFD700;
+}
+
+.test-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(100, 200, 255, 0.1);
+  border: 1px solid #64C8FF;
+  color: #64C8FF;
+  cursor: pointer;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+.test-btn:hover {
+  background: rgba(100, 200, 255, 0.2);
+}
+
+/* ========== アラーム音設定スタイル ========== */
+.alarm-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(100, 200, 255, 0.08);
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid rgba(100, 200, 255, 0.2);
+}
+
+.alarm-section.hidden {
+  display: none;
+}
+
+.alarm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.bell-icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid #FFD700;
+  background: rgba(255, 215, 0, 0.1);
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.bell-icon-btn:hover {
+  background: rgba(255, 215, 0, 0.2);
+  transform: scale(1.05);
+}
+
+.bell-icon-btn:active {
+  transform: scale(0.95);
+}
+
+.alarm-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64C8FF;
+}
+
+.pattern-buttons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.pattern-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  background: rgba(100, 200, 150, 0.1);
+  border: 1px solid #64C896;
+  color: #64C896;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+
+.pattern-btn:hover {
+  background: rgba(100, 200, 150, 0.2);
+}
+
+.pattern-btn.active {
+  background: #64C896;
+  color: #000;
+  border-color: #64C896;
+}
+
+.alarm-slider {
+  flex: 1;
+  min-width: 100px;
+  height: 5px;
+  background: rgba(100, 200, 255, 0.2);
+  border-radius: 3px;
+  -webkit-appearance: none;
+  appearance: none;
+  outline: none;
+  cursor: pointer;
+}
+
+.alarm-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #64C8FF;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.alarm-slider::-webkit-slider-thumb:hover {
+  background: #FFD700;
+  transform: scale(1.15);
+}
+
+.alarm-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #64C8FF;
+  cursor: pointer;
+  border: none;
+}
+
+.alarm-value {
+  font-size: 11px;
+  color: #64C8FF;
+  min-width: 50px;
+  text-align: right;
+  font-weight: 500;
+}
+
+/* スクロール可能な設定 */
+.bottom-section::-webkit-scrollbar {
+  width: 6px;
+}
+
+.bottom-section::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.bottom-section::-webkit-scrollbar-thumb {
+  background: rgba(255, 215, 0, 0.3);
+  border-radius: 3px;
+}
+
+/* レスポンシブ */
+@media (max-width: 600px) {
+  .container {
+    padding: 10px;
+    gap: 10px;
+  }
+
+  .button-area {
+    gap: 6px;
+  }
+
+  .settings-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- 上段：ステータスとボタン -->
+  <div class="top-section">
+    <!-- ステータス表示 -->
+    <div class="status-display">
+      <div class="status-row">
+        <div class="step-display" id="stepDisplay">発表</div>
+      </div>
+      <div class="status-row">
+        <div class="timer-display" id="timerDisplay">00:00</div>
+      </div>
+      <div class="status-row">
+        <div class="message-display" id="messageDisplay"></div>
+      </div>
+    </div>
+
+    <!-- プログレスバー -->
+    <div class="progress-container">
+      <div class="progress-label">
+        <span>進捗</span>
+        <span id="progressTime">0:00 / 0:00</span>
+      </div>
+      <div class="progress-bar" id="progressBar">
+        <div class="progress-fill stage-presentation" id="progressFill"></div>
+        <div id="milestones"></div>
+      </div>
+    </div>
+
+    <!-- ボタンエリア -->
+    <div class="button-area">
+      <button class="btn" id="startBtn">スタート</button>
+      <button class="btn btn-reset" id="resetBtn">リセット</button>
+    </div>
+  </div>
+
+  <!-- 下段：設定 -->
+  <div class="bottom-section" id="bottomSection">
+    <div class="settings-title">タイマー設定</div>
+
+    <!-- 発表時間と事前通知 -->
+    <div class="settings-row">
+      <div class="setting-group">
+        <label class="setting-label">発表時間</label>
+        <div class="number-buttons">
+          <button class="number-btn" id="presDown">−</button>
+          <input type="number" class="number-input" id="presInput" value="10" min="1" max="120">
+          <button class="number-btn" id="presUp">+</button>
+        </div>
+        <label class="setting-label">分</label>
+      </div>
+
+      <div class="setting-group">
+        <label class="setting-label bracket">事前通知</label>
+        <div class="number-buttons">
+          <button class="number-btn" id="notifyDown">−</button>
+          <input type="number" class="number-input" id="notifyInput" value="3" min="0" max="120">
+          <button class="number-btn" id="notifyUp">+</button>
+        </div>
+        <label class="setting-label">分</label>
+      </div>
+    </div>
+
+    <!-- 質疑時間 -->
+    <div class="settings-row">
+      <div class="setting-group">
+        <label class="setting-label">質疑時間</label>
+        <div class="number-buttons">
+          <button class="number-btn" id="qaDown">−</button>
+          <input type="number" class="number-input" id="qaInput" value="5" min="0" max="120">
+          <button class="number-btn" id="qaUp">+</button>
+        </div>
+        <label class="setting-label">分</label>
+      </div>
+    </div>
+
+    <!-- 発表終了時の動作 -->
+    <div class="settings-row">
+      <label class="setting-label">発表終了時:</label>
+      <div class="mode-buttons">
+        <button class="mode-btn active" id="pauseMode">一時停止</button>
+        <button class="mode-btn" id="continueMode">継続</button>
+      </div>
+    </div>
+
+    <!-- シミュレーション速度 -->
+    <div class="settings-row">
+      <label class="setting-label">⚡ 速度:</label>
+      <div class="mode-buttons">
+        <button class="mode-btn active" id="speed1x" data-speed="1">1x</button>
+        <button class="mode-btn" id="speed5x" data-speed="5">5x</button>
+        <button class="mode-btn" id="speed10x" data-speed="10">10x</button>
+        <button class="mode-btn" id="speed60x" data-speed="60">60x</button>
+      </div>
+    </div>
+
+    <!-- ========== アラーム音設定パネル ========== -->
+    <div class="alarm-section" id="alarmSection">
+      <!-- 鐘のアイコンボタン -->
+      <div class="alarm-header">
+        <button class="bell-icon-btn" id="bellIconBtn" title="鐘を鳴らす">🔔</button>
+        <span class="alarm-title">アラーム音設定</span>
+      </div>
+
+      <!-- 鳴らし方パターン選択 -->
+      <div class="settings-row">
+        <label class="setting-label">鳴らし方:</label>
+        <div class="pattern-buttons">
+          <button class="pattern-btn active" id="pattern1" data-pattern="1">1打</button>
+          <button class="pattern-btn" id="pattern2" data-pattern="2">2打</button>
+          <button class="pattern-btn" id="pattern3" data-pattern="3">3打</button>
+        </div>
+      </div>
+
+      <!-- 基音周波数スライダー -->
+      <div class="settings-row">
+        <label class="setting-label">基音:</label>
+        <input type="range" class="alarm-slider" id="pitchSlider" min="100" max="3000" value="1047" step="10">
+        <span class="alarm-value" id="pitchValue">1047Hz</span>
+      </div>
+
+      <!-- 音量スライダー -->
+      <div class="settings-row">
+        <label class="setting-label">音量:</label>
+        <input type="range" class="alarm-slider" id="volumeSlider" min="0" max="100" value="80" step="1">
+        <span class="alarm-value" id="volumeValue">80%</span>
+      </div>
+
+      <!-- アタックスライダー -->
+      <div class="settings-row">
+        <label class="setting-label">アタック:</label>
+        <input type="range" class="alarm-slider" id="attackSlider" min="1" max="50" value="20" step="1">
+        <span class="alarm-value" id="attackValue">20ms</span>
+      </div>
+
+      <!-- 余韻スライダー -->
+      <div class="settings-row">
+        <label class="setting-label">余韻:</label>
+        <input type="range" class="alarm-slider" id="decaySlider" min="1" max="12" value="0.6" step="0.1">
+        <span class="alarm-value" id="decayValue">0.6秒</span>
+      </div>
+
+      <!-- 倍音の強さスライダー -->
+      <div class="settings-row">
+        <label class="setting-label">倍音:</label>
+        <input type="range" class="alarm-slider" id="harmonicSlider" min="0" max="100" value="30" step="1">
+        <span class="alarm-value" id="harmonicValue">30%</span>
+      </div>
+
+      <!-- 打撃音スライダー -->
+      <div class="settings-row">
+        <label class="setting-label">打撃音:</label>
+        <input type="range" class="alarm-slider" id="crankSlider" min="0" max="100" value="10" step="1">
+        <span class="alarm-value" id="crankValue">10%</span>
+      </div>
+
+      <!-- 残響スライダー -->
+      <div class="settings-row">
+        <label class="setting-label">残響:</label>
+        <input type="range" class="alarm-slider" id="reverbSlider" min="0" max="100" value="10" step="1">
+        <span class="alarm-value" id="reverbValue">10%</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- バージョン表示 -->
+<div id="versionDisplay" style="position: fixed; bottom: 10px; right: 10px; font-size: 18px; color: #888; font-family: monospace; z-index: 1000;"></div>
+
+<script>
+// ========== UI要素取得 ==========
+const stepDisplay = document.getElementById('stepDisplay');
+const timerDisplay = document.getElementById('timerDisplay');
+const messageDisplay = document.getElementById('messageDisplay');
+const progressFill = document.getElementById('progressFill');
+const progressBar = document.getElementById('progressBar');
+const progressTime = document.getElementById('progressTime');
+const milestonesContainer = document.getElementById('milestones');
+const bottomSection = document.getElementById('bottomSection');
+
+const startBtn = document.getElementById('startBtn');
+const resetBtn = document.getElementById('resetBtn');
+
+const presInput = document.getElementById('presInput');
+const notifyInput = document.getElementById('notifyInput');
+const qaInput = document.getElementById('qaInput');
+
+const presUp = document.getElementById('presUp');
+const presDown = document.getElementById('presDown');
+const notifyUp = document.getElementById('notifyUp');
+const notifyDown = document.getElementById('notifyDown');
+const qaUp = document.getElementById('qaUp');
+const qaDown = document.getElementById('qaDown');
+
+const pauseModeBtn = document.getElementById('pauseMode');
+const continueModeBtn = document.getElementById('continueMode');
+
+// ========== アラーム音設定要素取得 ==========
+const alarmSection = document.getElementById('alarmSection');
+const bellIconBtn = document.getElementById('bellIconBtn');
+const pattern1 = document.getElementById('pattern1');
+const pattern2 = document.getElementById('pattern2');
+const pattern3 = document.getElementById('pattern3');
+const pitchSlider = document.getElementById('pitchSlider');
+const pitchValue = document.getElementById('pitchValue');
+const volumeSlider = document.getElementById('volumeSlider');
+const volumeValue = document.getElementById('volumeValue');
+const attackSlider = document.getElementById('attackSlider');
+const attackValue = document.getElementById('attackValue');
+const decaySlider = document.getElementById('decaySlider');
+const decayValue = document.getElementById('decayValue');
+const harmonicSlider = document.getElementById('harmonicSlider');
+const harmonicValue = document.getElementById('harmonicValue');
+const crankSlider = document.getElementById('crankSlider');
+const crankValue = document.getElementById('crankValue');
+const reverbSlider = document.getElementById('reverbSlider');
+const reverbValue = document.getElementById('reverbValue');
+
+// ========== バージョン情報 ==========
+const VERSION = {
+  major: 2,
+  minor: 4,
+  patch: 0,
+  toString() {
+    return `V${this.major}.${this.minor}.${this.patch}`;
+  }
+};
+const alarmParams = {
+  pattern: '1',        // 1, 2, 3, westminster
+  pitch: 1047,         // 基音：1047Hz（C6 - インターホンの標準周波数）
+  volume: 0.8,         // 0-1 (%) - 明るく聞き取りやすい
+  attack: 20,          // 1-50 ms - 電子的な瞬間的立ち上がり
+  decay: 0.6,          // 1-12 s - 短い減衰（インターホンは短め）
+  harmonic: 0.3,       // 0-1 (%) - 倍音は少なめ（シンプル）
+  crank: 0.1,          // 0-1 (%) - 打撃音は最小（電子音）
+  reverb: 0.1          // 0-1 (%) - 残響は最小（ドライな音）
+};
+
+// ========== シミュレーション速度 ==========
+let simSpeed = 1; // 1=等倍, 5=5倍, 10=10倍, 60=60倍
+
+document.querySelectorAll('[data-speed]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (state.isRunning) return;
+    simSpeed = parseInt(btn.dataset.speed);
+    document.querySelectorAll('[data-speed]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  });
+});
+
+// ========== グローバル状態 ==========
+let state = {
+  presTime: 10,     // 分
+  notifyTime: 3,    // 分
+  qaTime: 5,        // 分
+  pauseMode: true,  // true: 一時停止, false: 継続
+  
+  isRunning: false,
+  isPaused: false,
+  stage: 'presentation', // 'presentation', 'qa', 'finished'
+  
+  presTimeRemaining: 10 * 60,   // 秒
+  qaTimeRemaining: 5 * 60,      // 秒
+  totalTimeRemaining: (10 + 5) * 60, // 秒
+  
+  notifyAlarmPlayed: false,
+  presEndAlarmPlayed: false,
+  qaEndAlarmPlayed: false,
+  
+  timerInterval: null
+};
+
+// ========== アラーム機能 ==========
+// ========== ウェストミンスターチャイム再生 ==========
+function playWestminsterChime() {
+  const noteRatios = [1.189, 1.335, 1.587, 1.0, 1.335, 1.587, 1.189, 1.0];
+  const interval = 0.9;  // 発音間隔
+  
+  noteRatios.forEach((ratio, index) => {
+    setTimeout(() => {
+      playBellSoundWithParams(
+        alarmParams.pitch,
+        alarmParams.volume,
+        alarmParams.attack / 1000,  // msからsへ
+        alarmParams.decay,
+        alarmParams.harmonic,
+        alarmParams.crank,
+        alarmParams.reverb,
+        ratio
+      );
+    }, index * interval * 1000);
+  });
+}
+
+// ========== パラメータ指定でベル音を再生 ==========
+// ========== インターホンチャイム専用関数 ==========
+function playInterphoneChime(pitch, volume, attack, decay) {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioContext.currentTime;
+    const duration = decay;
+    const attackSec = attack / 1000;  // ミリ秒から秒へ
+    
+    // マスターゲイン
+    const masterGain = audioContext.createGain();
+    masterGain.gain.setValueAtTime(0, now);
+    // アタック（線形）
+    masterGain.gain.linearRampToValueAtTime(volume, now + attackSec);
+    // 減衰（線形 - 電子的な感じ）
+    masterGain.gain.linearRampToValueAtTime(0, now + duration);
+    masterGain.connect(audioContext.destination);
+    
+    // シンプルな単一周波数 - 周波数変調なし
+    const osc = audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(pitch, now);
+    
+    osc.connect(masterGain);
+    osc.start(now);
+    osc.stop(now + duration);
+  } catch (error) {
+    console.error('チャイム音声生成エラー:', error);
+  }
+}
+
+function playBellSoundWithParams(pitch, volume, attack, decay, harmonic, crank, reverb, pitchRatio = 1) {
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+  const now = audioContext.currentTime;
+  const baseFreq = pitch * pitchRatio;
+  const duration = decay;
+  
+  // マスターゲイン
+  const masterGain = audioContext.createGain();
+  masterGain.gain.setValueAtTime(0, now);
+  // アタック
+  masterGain.gain.linearRampToValueAtTime(volume, now + attack);
+  // 減衰
+  masterGain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+  masterGain.connect(audioContext.destination);
+  
+  // 倍音構成（教会の鐘）
+  const harmonics = [
+    { ratio: 1.0, gain: 1.0 },
+    { ratio: 2.756, gain: harmonic * 0.6 },
+    { ratio: 5.404, gain: harmonic * 0.3 },
+    { ratio: 8.933, gain: harmonic * 0.15 },
+    { ratio: 13.457, gain: harmonic * 0.07 }
+  ];
+  
+  // 各倍音を生成
+  harmonics.forEach(h => {
+    const osc = audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(baseFreq * h.ratio, now);
+    osc.frequency.exponentialRampToValueAtTime(baseFreq * h.ratio * 0.7, now + duration);
+    
+    const gain = audioContext.createGain();
+    gain.gain.setValueAtTime(h.gain, now);
+    gain.gain.exponentialRampToValueAtTime(0.01, now + duration);
+    
+    osc.connect(gain);
+    gain.connect(masterGain);
+    
+    osc.start(now);
+    osc.stop(now + duration);
+  });
+  
+  // 打撃音（ホワイトノイズバースト）
+  if (crank > 0) {
+    const crankDuration = 0.12;
+    const crankGain = audioContext.createGain();
+    crankGain.gain.setValueAtTime(crank * volume, now);
+    crankGain.gain.exponentialRampToValueAtTime(0.01, now + crankDuration);
+    crankGain.connect(masterGain);
+    
+    // ホワイトノイズ生成
+    const bufferSize = audioContext.sampleRate * crankDuration;
+    const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      noiseData[i] = Math.random() * 2 - 1;
+    }
+    
+    const noiseSource = audioContext.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    noiseSource.connect(crankGain);
+    noiseSource.start(now);
+    noiseSource.stop(now + crankDuration);
+  }
+}
+
+function playBellSound(count = 1, interval = 300) {
+  console.log(`playBellSound: ${count}回のチャイムを再生開始`);
+  for (let i = 0; i < count; i++) {
+    setTimeout(() => {
+      console.log(`チャイム ${i + 1}/${count} を再生`);
+      // インターホンチャイムは単純な電子音なので、専用関数を使用
+      playInterphoneChime(
+        alarmParams.pitch,
+        alarmParams.volume,
+        alarmParams.attack,  // msのまま
+        alarmParams.decay
+      );
+    }, i * interval);
+  }
+}
+
+// ========== 設定入力の処理 ==========
+function updateConfig() {
+  const presVal = Math.max(1, parseInt(presInput.value) || 1);
+  let notifyVal = Math.max(0, parseInt(notifyInput.value) || 0);
+  const qaVal = Math.max(0, parseInt(qaInput.value) || 0);
+  
+  // 事前通知が発表時間と同じか長い場合は、発表時間-1にする
+  if (notifyVal >= presVal) {
+    notifyVal = Math.max(0, presVal - 1);  // 最小値は0
+  }
+  
+  presInput.value = presVal;
+  notifyInput.value = notifyVal;
+  qaInput.value = qaVal;
+  
+  if (!state.isRunning) {
+    state.presTime = presVal;
+    state.notifyTime = notifyVal;
+    state.qaTime = qaVal;
+    state.presTimeRemaining = presVal * 60;
+    state.qaTimeRemaining = qaVal * 60;
+    state.totalTimeRemaining = (presVal + qaVal) * 60;
+    
+    updateDisplay();
+    updateMilestones();
+  }
+}
+
+presInput.addEventListener('input', updateConfig);
+notifyInput.addEventListener('input', updateConfig);
+qaInput.addEventListener('input', updateConfig);
+
+// 数値ボタン
+presUp.addEventListener('click', () => {
+  presInput.value = Math.min(120, parseInt(presInput.value) + 1);
+  updateConfig();
+});
+
+presDown.addEventListener('click', () => {
+  presInput.value = Math.max(1, parseInt(presInput.value) - 1);
+  updateConfig();
+});
+
+notifyUp.addEventListener('click', () => {
+  notifyInput.value = Math.min(parseInt(presInput.value), parseInt(notifyInput.value) + 1);
+  updateConfig();
+});
+
+notifyDown.addEventListener('click', () => {
+  notifyInput.value = Math.max(0, parseInt(notifyInput.value) - 1);
+  updateConfig();
+});
+
+qaUp.addEventListener('click', () => {
+  qaInput.value = Math.min(120, parseInt(qaInput.value) + 1);
+  updateConfig();
+});
+
+qaDown.addEventListener('click', () => {
+  qaInput.value = Math.max(0, parseInt(qaInput.value) - 1);
+  updateConfig();
+});
+
+// モード選択
+pauseModeBtn.addEventListener('click', () => {
+  if (!state.isRunning) {
+    state.pauseMode = true;
+    pauseModeBtn.classList.add('active');
+    continueModeBtn.classList.remove('active');
+  }
+});
+
+continueModeBtn.addEventListener('click', () => {
+  if (!state.isRunning) {
+    state.pauseMode = false;
+    pauseModeBtn.classList.remove('active');
+    continueModeBtn.classList.add('active');
+  }
+});
+
+// ========== アラーム音設定イベント ==========
+// パターン選択ボタン（1打/2打/3打）
+pattern1.addEventListener('click', () => {
+  alarmParams.pattern = '1';
+  document.querySelectorAll('.pattern-btn').forEach(btn => btn.classList.remove('active'));
+  pattern1.classList.add('active');
+});
+
+pattern2.addEventListener('click', () => {
+  alarmParams.pattern = '2';
+  document.querySelectorAll('.pattern-btn').forEach(btn => btn.classList.remove('active'));
+  pattern2.classList.add('active');
+});
+
+pattern3.addEventListener('click', () => {
+  alarmParams.pattern = '3';
+  document.querySelectorAll('.pattern-btn').forEach(btn => btn.classList.remove('active'));
+  pattern3.classList.add('active');
+});
+
+// 🔔アイコンボタン - 現在のパターンで鐘を鳴らす
+bellIconBtn.addEventListener('click', () => {
+  console.log('🔔 チャイムボタンクリック');
+  console.log('パラメータ:', {
+    pitch: alarmParams.pitch,
+    volume: alarmParams.volume,
+    attack: alarmParams.attack,
+    decay: alarmParams.decay,
+    pattern: alarmParams.pattern
+  });
+  
+  const count = parseInt(alarmParams.pattern);
+  console.log(`チャイムを${count}回再生します`);
+  playBellSound(count);
+});
+
+// スライダーイベント
+pitchSlider.addEventListener('input', (e) => {
+  alarmParams.pitch = parseInt(e.target.value);
+  pitchValue.textContent = alarmParams.pitch + 'Hz';
+});
+
+volumeSlider.addEventListener('input', (e) => {
+  alarmParams.volume = parseInt(e.target.value) / 100;
+  volumeValue.textContent = e.target.value + '%';
+});
+
+attackSlider.addEventListener('input', (e) => {
+  alarmParams.attack = parseInt(e.target.value);
+  attackValue.textContent = alarmParams.attack + 'ms';
+});
+
+decaySlider.addEventListener('input', (e) => {
+  alarmParams.decay = parseFloat(e.target.value);
+  decayValue.textContent = alarmParams.decay.toFixed(1) + '秒';
+});
+
+harmonicSlider.addEventListener('input', (e) => {
+  alarmParams.harmonic = parseInt(e.target.value) / 100;
+  harmonicValue.textContent = e.target.value + '%';
+});
+
+crankSlider.addEventListener('input', (e) => {
+  alarmParams.crank = parseInt(e.target.value) / 100;
+  crankValue.textContent = e.target.value + '%';
+});
+
+reverbSlider.addEventListener('input', (e) => {
+  alarmParams.reverb = parseInt(e.target.value) / 100;
+  reverbValue.textContent = e.target.value + '%';
+});
+
+// ========== タイマー表示 ==========
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
+function updateDisplay() {
+  // ステップ表示
+  if (state.stage === 'presentation') {
+    stepDisplay.textContent = '発表';
+  } else if (state.stage === 'qa') {
+    stepDisplay.textContent = '質疑応答';
+  } else {
+    stepDisplay.textContent = '終了';
+  }
+  
+  // タイマー表示
+  let timeDisplay = formatTime(state.presTimeRemaining);
+  if (state.stage === 'qa') {
+    timeDisplay = formatTime(state.qaTimeRemaining);
+  } else if (state.stage === 'finished') {
+    timeDisplay = formatTime(0);
+  }
+  
+  timerDisplay.textContent = timeDisplay;
+  
+  // プログレスバー
+  const totalTime = (state.presTime + state.qaTime) * 60;
+  const elapsed = totalTime - state.totalTimeRemaining;
+  const progress = totalTime > 0 ? (elapsed / totalTime) * 100 : 0;
+  
+  progressFill.style.width = progress + '%';
+  progressTime.textContent = formatTime(elapsed) + ' / ' + formatTime(totalTime);
+  
+  // ステージに応じた色変更
+  progressFill.className = 'progress-fill';
+  if (state.stage === 'presentation') {
+    progressFill.classList.add('stage-presentation');
+  } else if (state.stage === 'qa') {
+    progressFill.classList.add('stage-qa');
+  } else {
+    progressFill.classList.add('stage-finished');
+  }
+}
+
+// ========== マイルストーン表示 ==========
+function updateMilestones() {
+  milestonesContainer.innerHTML = '';
+  
+  const totalTime = (state.presTime + state.qaTime) * 60;
+  if (totalTime === 0) return;
+  
+  // 事前通知時のマイルストーン
+  const notifyTimeSeconds = state.notifyTime * 60;
+  const notifyPercent = ((state.presTime * 60 - notifyTimeSeconds) / totalTime) * 100;
+  
+  if (state.notifyTime > 0 && notifyPercent > 0 && notifyPercent < 100) {
+    const milestone1 = document.createElement('div');
+    milestone1.className = 'milestone';
+    milestone1.style.left = notifyPercent + '%';
+    const label1 = document.createElement('div');
+    label1.className = 'milestone-label';
+    label1.textContent = '通知';
+    milestone1.appendChild(label1);
+    milestonesContainer.appendChild(milestone1);
+  }
+  
+  // 発表終了時のマイルストーン
+  const presPercent = (state.presTime * 60 / totalTime) * 100;
+  if (presPercent > 0 && presPercent < 100) {
+    const milestone2 = document.createElement('div');
+    milestone2.className = 'milestone';
+    milestone2.style.left = presPercent + '%';
+    const label2 = document.createElement('div');
+    label2.className = 'milestone-label';
+    label2.textContent = '発表終了';
+    milestone2.appendChild(label2);
+    milestonesContainer.appendChild(milestone2);
+  }
+}
+
+// ========== タイマーロジック ==========
+function startTimer() {
+  if (state.timerInterval) return;
+  
+  state.isRunning = true;
+  state.isPaused = false;
+  
+  // 設定パネルを非表示にする
+  bottomSection.classList.add('hidden');
+  alarmSection.classList.add('hidden');
+  
+  state.timerInterval = setInterval(() => {
+    for (let tick = 0; tick < simSpeed; tick++) {
+    if (state.totalTimeRemaining > 0) {
+      state.totalTimeRemaining--;
+
+      if (state.stage === 'presentation') {
+        state.presTimeRemaining--;
+        
+        // 事前通知チェック
+        if (!state.notifyAlarmPlayed && state.presTimeRemaining === state.notifyTime * 60 && state.notifyTime > 0) {
+          messageDisplay.textContent = `発表残り${state.notifyTime}分を切りました。`;
+          playBellSound(1);
+          state.notifyAlarmPlayed = true;
+        }
+        
+        // 発表終了チェック
+        if (state.presTimeRemaining === 0) {
+          messageDisplay.textContent = '発表終了';
+          
+          // 質疑時間が0の場合はチャイムを鳴らさない（最後に3回鳴らすため）
+          // 質疑時間が0でない場合のみ発表終了で2回チャイム
+          if (state.qaTime > 0) {
+            playBellSound(2, 300);
+          }
+          
+          state.presEndAlarmPlayed = true;
+          
+          // まずタイマーを停止して00:00を表示
+          pauseTimer();
+          updateDisplay();
+          startBtn.textContent = '再開';
+          
+          if (state.pauseMode) {
+            // 5秒後に質疑時間を表示してメッセージを消す
+            setTimeout(() => {
+              state.stage = 'qa';
+              state.qaTimeRemaining = state.qaTime * 60;
+              messageDisplay.textContent = '';
+              updateDisplay();
+              
+              // 質疑時間が0の場合は即座に終了状態に移行
+              if (state.qaTime === 0) {
+                messageDisplay.textContent = '';
+                playBellSound(3, 300);
+                state.qaEndAlarmPlayed = true;
+                state.stage = 'finished';
+                startBtn.textContent = 'リスタート';
+                pauseTimer();
+                updateDisplay();
+              }
+              // ユーザーが再開クリックするまで待機
+              // （qaTime > 0 の場合）
+            }, 5000);
+          } else {
+            // すぐに質疑に移行して継続
+            state.stage = 'qa';
+            state.qaTimeRemaining = state.qaTime * 60;
+            messageDisplay.textContent = '';
+            updateDisplay();
+            
+            // 質疑時間が0の場合は即座に終了状態に移行
+            if (state.qaTime === 0) {
+              state.qaTimeRemaining = 0;
+              messageDisplay.textContent = '';
+              // 質疑時間が0の場合のみチャイム3回（発表終了時のチャイム2回は鳴らさない）
+              playBellSound(3, 300);
+              state.qaEndAlarmPlayed = true;
+              state.stage = 'finished';
+              startBtn.textContent = 'リスタート';
+              pauseTimer();
+              updateDisplay();
+            } else {
+              // 質疑時間が0でない場合はチャイム2回を鳴らす（既に1145行で鳴っている）
+              startTimer();
+            }
+          }
+        }
+      } else if (state.stage === 'qa') {
+        // 質疑時間が0分の場合はスキップ（発表終了時に処理済み）
+        if (state.qaTime > 0) {
+          state.qaTimeRemaining--;
+        }
+        
+        // 質疑終了チェック
+        if (state.qaTimeRemaining <= 0) {
+          messageDisplay.textContent = '';
+          if (!state.qaEndAlarmPlayed) {
+            playBellSound(3, 300);
+          }
+          state.qaEndAlarmPlayed = true;
+          state.stage = 'finished';
+          pauseTimer();
+          startBtn.textContent = 'リスタート';
+        }
+      }
+    }
+    } // end for tick loop
+
+    updateDisplay();
+  }, 1000);
+}
+
+function pauseTimer() {
+  if (state.timerInterval) {
+    clearInterval(state.timerInterval);
+    state.timerInterval = null;
+    state.isRunning = false;
+    state.isPaused = true;
+  }
+}
+
+function resumeTimer() {
+  if (state.isPaused && !state.isRunning) {
+    startTimer();
+  }
+}
+
+function resetTimer() {
+  pauseTimer();
+  
+  state.presTimeRemaining = state.presTime * 60;
+  state.qaTimeRemaining = state.qaTime * 60;
+  state.totalTimeRemaining = (state.presTime + state.qaTime) * 60;
+  state.stage = 'presentation';
+  state.notifyAlarmPlayed = false;
+  state.presEndAlarmPlayed = false;
+  state.qaEndAlarmPlayed = false;
+  state.isPaused = false;
+  
+  messageDisplay.textContent = '';
+  
+  // 設定パネルを表示する
+  bottomSection.classList.remove('hidden');
+  alarmSection.classList.remove('hidden');
+  
+  updateDisplay();
+  updateMilestones();
+  
+  startBtn.textContent = 'スタート';
+}
+
+// ========== ボタンイベント ==========
+startBtn.addEventListener('click', () => {
+  // リスタート：state.stage === 'finished' かつ isRunning=false
+  if (state.stage === 'finished' && !state.isRunning) {
+    console.log('🔄 リスタート処理開始');
+    // リスタート：設定値をセットしてスタート
+    state.presTime = parseInt(presInput.value);
+    state.notifyTime = parseInt(notifyInput.value);
+    state.qaTime = parseInt(qaInput.value);
+    state.presTimeRemaining = state.presTime * 60;
+    state.qaTimeRemaining = state.qaTime * 60;
+    state.totalTimeRemaining = (state.presTime + state.qaTime) * 60;
+    state.stage = 'presentation';
+    state.isPaused = false;
+    state.notifyAlarmPlayed = false;
+    state.presEndAlarmPlayed = false;
+    state.qaEndAlarmPlayed = false;
+    
+    console.log('状態更新:', {
+      presTime: state.presTime,
+      notifyTime: state.notifyTime,
+      qaTime: state.qaTime,
+      presTimeRemaining: state.presTimeRemaining,
+      stage: state.stage
+    });
+    
+    // 設定パネルを隠す
+    bottomSection.classList.add('hidden');
+    alarmSection.classList.add('hidden');
+    
+    // 画面を更新
+    updateDisplay();
+    updateMilestones();
+    
+    console.log('表示更新完了');
+    
+    // カウントダウン開始
+    startTimer();
+    console.log('🎵 カウントダウン開始');
+    startBtn.textContent = '一時停止';
+  } else if (!state.isRunning && !state.isPaused) {
+    // スタート
+    startTimer();
+    startBtn.textContent = '一時停止';
+  } else if (state.isRunning) {
+    // 一時停止
+    pauseTimer();
+    startBtn.textContent = '再開';
+  } else if (state.isPaused) {
+    // 再開
+    resumeTimer();
+    startBtn.textContent = '一時停止';
+  }
+});
+
+resetBtn.addEventListener('click', () => {
+  resetTimer();
+});
+
+// ========== 初期化 ==========
+console.log('🎵 発表タイマー初期化完了');
+console.log(`バージョン: ${VERSION.toString()}`);
+console.log('デフォルトパラメータ:', alarmParams);
+
+// バージョン表示を画面右下に表示
+document.getElementById('versionDisplay').textContent = VERSION.toString();
+
+updateMilestones();
+updateDisplay();
+</script>
+
+</body>
+</html>
