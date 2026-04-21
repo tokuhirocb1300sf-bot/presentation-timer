@@ -464,6 +464,63 @@ body {
   font-weight: 500;
 }
 
+/* ========== トグルスイッチ ========== */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  border-top: 1px solid rgba(255,255,255,0.1);
+  padding-top: 10px;
+  margin-top: 4px;
+}
+
+.toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #aaa;
+  cursor: pointer;
+  user-select: none;
+}
+
+.toggle-label input[type="checkbox"] {
+  display: none;
+}
+
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 18px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 9px;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #888;
+  transition: transform 0.2s, background 0.2s;
+}
+
+.toggle-label input:checked + .toggle-switch {
+  background: rgba(255, 215, 0, 0.35);
+}
+
+.toggle-label input:checked + .toggle-switch::after {
+  transform: translateX(18px);
+  background: #FFD700;
+}
+
 /* スクロール可能な設定 */
 .bottom-section::-webkit-scrollbar {
   width: 6px;
@@ -583,7 +640,7 @@ body {
     </div>
 
     <!-- シミュレーション速度 -->
-    <div class="settings-row">
+    <div class="settings-row" id="speedRow">
       <label class="setting-label">⚡ 速度:</label>
       <div class="mode-buttons">
         <button class="mode-btn active" id="speed1x" data-speed="1">1x</button>
@@ -591,6 +648,20 @@ body {
         <button class="mode-btn" id="speed10x" data-speed="10">10x</button>
         <button class="mode-btn" id="speed60x" data-speed="60">60x</button>
       </div>
+    </div>
+
+    <!-- 表示設定トグル -->
+    <div class="toggle-row">
+      <label class="toggle-label">
+        <span>⚡ 速度</span>
+        <input type="checkbox" id="toggleSpeed" checked>
+        <span class="toggle-switch"></span>
+      </label>
+      <label class="toggle-label">
+        <span>🔔 アラーム音設定</span>
+        <input type="checkbox" id="toggleAlarm" checked>
+        <span class="toggle-switch"></span>
+      </label>
     </div>
 
     <!-- ========== アラーム音設定パネル ========== -->
@@ -719,7 +790,7 @@ const reverbValue = document.getElementById('reverbValue');
 const VERSION = {
   major: 2,
   minor: 4,
-  patch: 0,
+  patch: 1,
   toString() {
     return `V${this.major}.${this.minor}.${this.patch}`;
   }
@@ -745,6 +816,15 @@ document.querySelectorAll('[data-speed]').forEach(btn => {
     document.querySelectorAll('[data-speed]').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
   });
+});
+
+// ========== 表示トグル ==========
+document.getElementById('toggleSpeed').addEventListener('change', function() {
+  document.getElementById('speedRow').style.display = this.checked ? '' : 'none';
+});
+
+document.getElementById('toggleAlarm').addEventListener('change', function() {
+  document.getElementById('alarmSection').style.display = this.checked ? '' : 'none';
 });
 
 // ========== グローバル状態 ==========
